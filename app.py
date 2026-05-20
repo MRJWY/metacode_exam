@@ -1,73 +1,111 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
+from pathlib import Path
+
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import streamlit as st
 from scipy.stats import gaussian_kde
 
-@st.cache_data
-def load_data(file_path):
-    df = pd.read_csv(file_path)
-    if 'YEAR' in df.columns:
-        # 소수점 제거 후 정수로 변환
-        df['YEAR_INT'] = df['YEAR'].astype(int)
-        df['DATE'] = pd.to_datetime(df['YEAR_INT'].astype(str), format='%Y')
-        df.set_index('DATE', inplace=True)
-    return df
+DATA_FILE = Path("data/sunspots.csv")
+REQUIRED_COLUMNS = {"YEAR", "SUNACTIVITY"}
 
-def plot_advanced_sunspot_visualizations(df, sunactivity_col='SUNACTIVITY'):
+
+def prepare_data(df: pd.DataFrame) -> pd.DataFrame:
+    missing_columns = REQUIRED_COLUMNS - set(df.columns)
+    if missing_columns:
+        missing_list = ", ".join(sorted(missing_columns))
+        raise ValueError(f"CSV file is missing required columns: {missing_list}")
+
+    cleaned_df = df.copy()
+    cleaned_df["YEAR"] = pd.to_numeric(cleaned_df["YEAR"], errors="coerce")
+    cleaned_df["SUNACTIVITY"] = pd.to_numeric(cleaned_df["SUNACTIVITY"], errors="coerce")
+    cleaned_df = cleaned_df.dropna(subset=["YEAR", "SUNACTIVITY"]).copy()
+
+    if cleaned_df.empty:
+        raise ValueError("No valid rows were found after cleaning YEAR and SUNACTIVITY.")
+
+    cleaned_df["YEAR_INT"] = cleaned_df["YEAR"].astype(int)
+    cleaned_df["DATE"] = pd.to_datetime(cleaned_df["YEAR_INT"].astype(str), format="%Y")
+    cleaned_df = cleaned_df.sort_values("DATE").set_index("DATE")
+    return cleaned_df
+
+
+@st.cache_data
+def load_data_from_path(file_path: str) -> pd.DataFrame:
+    return prepare_data(pd.read_csv(file_path))
+
+
+def load_data_from_upload(uploaded_file) -> pd.DataFrame:
+    return prepare_data(pd.read_csv(uploaded_file))
+
+
+def plot_advanced_sunspot_visualizations(
+    df: pd.DataFrame, sunactivity_col: str = "SUNACTIVITY"
+):
     fig, axs = plt.subplots(2, 2, figsize=(15, 12))
     fig.suptitle("Sunspots Data Advanced Visualization", fontsize=18)
 
-    # (a) 전체 시계열 라인 차트
-    axs[0, 0].plot(df.index, df[sunactivity_col], color='blue', linewidth=1.5)
-
-
+    axs[0, 0].plot(df.index, df[sunactivity_col], color="blue", linewidth=1.5)
     axs[0, 0].set_title("Sunspot Activity Over Time")
     axs[0, 0].set_xlabel("Year")
     axs[0, 0].set_ylabel("Sunspot Count")
     axs[0, 0].grid(True)
 
-    # (b) 분포: 히스토그램 + 커널 밀도
-    data = df[sunactivity_col].dropna().values
-    if len(data) > 0:  # 데이터가 있는지 확인
-        xs = np.linspace(data.min(), data.max(), 200)
-        density = gaussian_kde(data)
+    data = df[sunactivity_col].dropna().to_numpy()
+    if len(data) > 0:
+        axs[0, 1].hist(
+            data,
+            bins=min(30, max(5, len(data) // 2)),
+            density=True,
+            alpha=0.6,
+            color="gray",
+            label="Histogram",
+        )
 
-        axs[0, 1].hist(data, bins=30, density=True, alpha=0.6, color='gray', label='Histogram')
+        if len(data) > 1 and np.unique(data).size > 1:
+            xs = np.linspace(data.min(), data.max(), 200)
+            density = gaussian_kde(data)
+            axs[0, 1].plot(xs, density(xs), color="red", linewidth=2, label="Density")
 
-        axs[0, 1].plot(xs, density(xs), color='red', linewidth=2, label='Density')
     axs[0, 1].set_title("Distribution of Sunspot Activity")
     axs[0, 1].set_xlabel("Sunspot Count")
     axs[0, 1].set_ylabel("Density")
     axs[0, 1].legend()
     axs[0, 1].grid(True)
 
-    # (c) 상자 그림: 1900년~2000년
-    try:
-        df_20th = df.loc["1900":"2000"]
-        if not df_20th.empty:
-            axs[1, 0].boxplot(df_20th[sunactivity_col].dropna(), vert=False)
-
-    except:
-        # 해당 기간 데이터가 없을 경우 예외 처리
-        pass
+    df_20th = df.loc["1900":"2000"]
+    if not df_20th.empty:
+        axs[1, 0].boxplot(df_20th[sunactivity_col].dropna(), vert=False)
     axs[1, 0].set_title("Boxplot of Sunspot Activity (1900-2000)")
     axs[1, 0].set_xlabel("Sunspot Count")
 
-    # (d) 산점도 + 회귀선
-    years = df['YEAR'].values
-    sun_activity = df[sunactivity_col].values
+    years = df["YEAR_INT"].to_numpy()
+    sun_activity = df[sunactivity_col].to_numpy()
 
-    # NaN 값 제거
     mask = ~np.isnan(sun_activity)
     years_clean = years[mask]
     sun_activity_clean = sun_activity[mask]
 
-    if len(years_clean) > 1:  # 회귀선을 그리기 위해 최소 2개 이상의 데이터 필요
-        axs[1, 1].scatter(years_clean, sun_activity_clean, s=10, alpha=0.5, label='Data Points')
+    if len(years_clean) > 0:
+        axs[1, 1].scatter(
+            years_clean,
+            sun_activity_clean,
+            s=10,
+            alpha=0.5,
+            label="Data Points",
+        )
+
+    if len(years_clean) > 1 and np.unique(years_clean).size > 1:
         coef = np.polyfit(years_clean, sun_activity_clean, 1)
         trend = np.poly1d(coef)
-        axs[1, 1].plot(years_clean, trend(years_clean), color='red', linewidth=2, label='Trend Line')
+        axs[1, 1].plot(
+            years_clean,
+            trend(years_clean),
+            color="red",
+            linewidth=2,
+            label="Trend Line",
+        )
+
     axs[1, 1].set_title("Trend of Sunspot Activity")
     axs[1, 1].set_xlabel("Year")
     axs[1, 1].set_ylabel("Sunspot Count")
@@ -77,27 +115,45 @@ def plot_advanced_sunspot_visualizations(df, sunactivity_col='SUNACTIVITY'):
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     return fig
 
-# 메인 앱
-st.title('🌞 태양흑점 데이터 분석 대시보드 🌞')
-st.markdown("""
-    이 대시보드는 태양흑점 데이터를 다양한 시각화 방법으로 보여줍니다.
-    """)
+
+def render_data_source_help():
+    st.info(
+        "기본 데이터 파일 `data/sunspots.csv`를 찾지 못했습니다. "
+        "사이드바에서 CSV를 업로드하면 바로 시각화를 볼 수 있습니다."
+    )
+    st.code("YEAR,SUNACTIVITY\n1900,9.5\n1901,2.7\n1902,5.0", language="csv")
+
+
+st.set_page_config(page_title="Sunspots Dashboard", layout="wide")
+st.title("태양흑점 데이터 분석 대시보드")
+st.markdown("이 대시보드는 태양흑점 데이터를 다양한 시각화 방법으로 보여줍니다.")
+
+st.sidebar.header("데이터 불러오기")
+uploaded_file = st.sidebar.file_uploader("CSV 파일 업로드", type=["csv"])
+
+df = None
+data_source_label = None
 
 try:
-    # 데이터 로드
-    df = load_data('data/sunspots.csv')
-
-    # 필터링된 데이터 - 전체 데이터 사용
-    filtered_df = df
-
-    # 시각화
-    if not filtered_df.empty:
-        st.subheader('태양흑점 데이터 종합 시각화')
-        fig = plot_advanced_sunspot_visualizations(filtered_df)
-        st.pyplot(fig)
+    if uploaded_file is not None:
+        df = load_data_from_upload(uploaded_file)
+        data_source_label = f"업로드 파일: {uploaded_file.name}"
+    elif DATA_FILE.exists():
+        df = load_data_from_path(str(DATA_FILE))
+        data_source_label = f"기본 파일: {DATA_FILE.as_posix()}"
     else:
-        st.warning("데이터가 없습니다.")
+        render_data_source_help()
+        st.stop()
 
-except Exception as e:
-    st.error(f"오류가 발생했습니다: {e}")
-    st.info("데이터 파일의 구조를 확인해주세요. 'data/sunspots.csv' 파일이 존재하고 'YEAR'와 'SUNACTIVITY' 컬럼이 있어야 합니다.")
+    st.caption(f"데이터 소스: {data_source_label}")
+    st.subheader("태양흑점 데이터 종합 시각화")
+    fig = plot_advanced_sunspot_visualizations(df)
+    st.pyplot(fig)
+    st.dataframe(df[["YEAR_INT", "SUNACTIVITY"]].rename(columns={"YEAR_INT": "YEAR"}))
+
+except Exception as exc:
+    st.error(f"오류가 발생했습니다: {exc}")
+    st.info(
+        "CSV 파일에는 `YEAR`와 `SUNACTIVITY` 컬럼이 있어야 하며, "
+        "두 컬럼 모두 숫자로 변환 가능한 값이어야 합니다."
+    )
