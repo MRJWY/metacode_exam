@@ -102,7 +102,13 @@ try:
     year_min = int(df['YEAR'].min())
     year_max = int(df['YEAR'].max())
 
-
+    year_range = st.sidebar.slider(
+    '연도 범위',
+    min_value=year_min,
+    max_value=year_max,
+    value=(year_min, year_max)
+    )
+    
     # 히스토그램 빈(bin) 수 조절
     hist_bins = st.sidebar.slider(
         '히스토그램 구간 수',
