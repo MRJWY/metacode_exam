@@ -125,7 +125,7 @@ def render_data_source_help():
 
 
 st.set_page_config(page_title="Sunspots Dashboard", layout="wide")
-st.title("태양흑점 데이터 분석 대시보드")
+st.title(🌞 태양흑점 데이터 분석 대시보드 🌞)
 st.markdown("이 대시보드는 태양흑점 데이터를 다양한 시각화 방법으로 보여줍니다.")
 
 st.sidebar.header("데이터 불러오기")
